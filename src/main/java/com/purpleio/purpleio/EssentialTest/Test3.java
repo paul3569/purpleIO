@@ -11,7 +11,6 @@ public class Test3 {
         int result = 0;
 
         for (String score : scores) {
-            // ":" 구분자로 나누기
             String[] resultScore = score.split(":");
             int p1 = Integer.parseInt(resultScore[0]);
             int p2 = Integer.parseInt(resultScore[1]);

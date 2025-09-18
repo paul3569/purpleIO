@@ -12,6 +12,7 @@ public class Test2 {
 
         int result = 0;
 
+        // null 체크
         if (nums == null || nums.length == 0) {
             return 0; // 배열이 비었으면 0 반환
         }
