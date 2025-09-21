@@ -3,7 +3,14 @@
 ***
 
 ## 백엔드 테스트
-- [oEmbed 데이터 수집 서비스 만들기]()
+- [oEmbed 데이터 수집 서비스 만들기 back-end](src/main/java/com/purpleio/purpleio/Controller/OEmbedController.java)
+- [oEmbed 데이터 수집 서비스 만들기 front-end](src/main/resources/static/index.html)
+
+***
+#### instagram oEmbed 기능을 사용 불가 이슈
+- oEmbed API 정책을 변경해 개방형 사용을 중단
+- 인증된 개발자 계정, 앱 등록, 비즈니스 계정 연결, 앱 검수 등 복잡한 절차와 액세스 토큰이 필요
+- 공식 문서 : https://developers.facebook.com/docs/instagram-platform/oembed?locale=ko_KR
 
 
 ***

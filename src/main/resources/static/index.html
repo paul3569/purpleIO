@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>oEmbed 미리보기 (백엔드 API 호출)</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        input { width: 80%; padding: 8px; }
+        button { padding: 8px 12px; }
+        .preview { margin-top: 20px; }
+        .error { color: red; }
+    </style>
+</head>
+<body>
+
+<h1>oEmbed 미리보기</h1>
+
+<input id="urlInput" type="text" placeholder="유튜브, 인스타그램, 트위터 URL 입력" />
+<button onclick="fetchOEmbed()">미리보기</button>
+
+<div id="error" class="error"></div>
+<div id="result" class="preview"></div>
+
+<script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
+
+<script>
+    async function fetchOEmbed() {
+        const url = document.getElementById('urlInput').value.trim();
+        const errorDiv = document.getElementById('error');
+        const resultDiv = document.getElementById('result');
+        errorDiv.textContent = '';
+        resultDiv.innerHTML = '';
+
+        if (!url) {
+            errorDiv.textContent = 'URL을 입력하세요.';
+            return;
+        }
+
+        try {
+            const apiUrl = `/api/oembed?url=${encodeURIComponent(url)}`;
+
+            console.log(apiUrl);
+
+            const response = await fetch(apiUrl, {
+                headers: {
+                    'Accept': 'application/json'
+                }
+            });
+
+            if (!response.ok) {
+                throw new Error(`${response.status} ${response.statusText}`);
+            }
+
+            const data = await response.json();
+
+            let html = `<h2>${data.title || '제목 없음'}</h2>`;
+
+            if (data.thumbnail_url) {
+                html += `<img src="${data.thumbnail_url}" alt="썸네일" style="max-width:100%; max-height:300px;" />`;
+            }
+
+            if (data.html) {
+                // 트위터 oEmbed의 html 필드를 직접 삽입하여 임베딩 처리
+                html += `<div id="twitter-embed">${data.html}</div>`;
+            }
+
+            html += `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+            resultDiv.innerHTML = html;
+
+            // 트위터 임베드 재처리 (widgets.js가 동적으로 처리해줌)
+            if(window.twttr && window.twttr.widgets) {
+                window.twttr.widgets.load(document.getElementById('twitter-embed'));
+            }
+
+        } catch (e) {
+            errorDiv.textContent = 'oEmbed 요청 실패: ' + e.message;
+        }
+    }
+</script>
+
+</body>
+</html>

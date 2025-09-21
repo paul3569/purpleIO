@@ -1,98 +1,105 @@
 package com.purpleio.purpleio.Controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.swagger.v3.oas.annotations.Operation;
-import io.swagger.v3.oas.annotations.Parameter;
-import io.swagger.v3.oas.annotations.tags.Tag;
-import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.client.reactive.ReactorClientHttpConnector;
 import org.springframework.web.bind.annotation.*;
-import org.springframework.web.client.RestTemplate;
+import org.springframework.web.reactive.function.client.WebClient;
+import reactor.core.publisher.Mono;
+import reactor.netty.http.client.HttpClient;
 
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.Map;
 
 @RestController
 @RequestMapping("/api/oembed")
-@CrossOrigin(origins = "*")  // 모든 출처 허용
-@Tag(name = "oEmbed", description = "oEmbed 데이터 수집")
+@CrossOrigin(origins = "*")
 public class OEmbedController {
 
-    private final RestTemplate restTemplate = new RestTemplate();
+    private final WebClient webClient;
+    private static final String INSTAGRAM_ACCESS_TOKEN = "your_instagram_access_token_here";
 
-
-    // 지원되는 서비스의 oEmbed 엔드포인트
     private static final Map<String, String> ENDPOINTS = Map.of(
-            "youtube.com", "https://www.youtube.com/oembed?format=json&url=",
-            "youtu.be", "https://www.youtube.com/oembed?format=json&url=",
-            "vimeo.com", "https://vimeo.com/api/oembed.json?url=",
-            "twitter.com", "https://publish.twitter.com/oembed?url=",
-            "instagram.com", "https://graph.facebook.com/v22.0/instagram_oembed?url="
+            "youtube.com", "https://www.youtube.com/oembed",
+            "youtu.be", "https://www.youtube.com/oembed",
+            "vimeo.com", "https://vimeo.com/api/oembed.json",
+            "twitter.com", "https://publish.twitter.com/oembed",
+            "instagram.com", "https://graph.facebook.com/v12.0/instagram_oembed"
     );
 
-    @Operation(summary = "oEmbed 데이터 조회 및 썸네일 미리보기 제공")
+    public OEmbedController() {
+        HttpClient httpClient = HttpClient.create()
+                .responseTimeout(Duration.ofSeconds(5));
+
+        this.webClient = WebClient.builder()
+                .clientConnector(new ReactorClientHttpConnector(httpClient))
+                .defaultHeader(HttpHeaders.USER_AGENT, "Mozilla/5.0")
+                .defaultHeader(HttpHeaders.ACCEPT, MediaType.APPLICATION_JSON_VALUE)
+                .build();
+    }
+
     @GetMapping
-    public ResponseEntity<Map<String, Object>> fetchOEmbed(
-            @Parameter(name = "url", description = "미리보기 대상 URL", required = true)
-            @RequestParam(name = "url") String url) {
-        String endpoint = getOEmbedEndpoint(url);
+    public Mono<ResponseEntity<? extends Map<String,? extends Object>>> getEmbedData(@RequestParam String url) {
+        if (url == null || url.isBlank()) {
+            return Mono.just(ResponseEntity.badRequest().body(Map.of("error", "URL 파라미터가 필요합니다.")));
+        }
+
+        String endpoint = getEndpoint(url);
         if (endpoint == null) {
-            return ResponseEntity.badRequest().body(Map.of("error", "지원하지 않는 URL입니다."));
+            return Mono.just(ResponseEntity.badRequest().body(Map.of("error", "지원하지 않는 URL입니다.")));
         }
 
-        // Instagram은 별도 처리
-        if (isInstagram(url)) {
-            return handleInstagramOembed(url);
-        }
+        WebClient.RequestHeadersUriSpec<?> requestSpec = webClient.get();
 
-        try {
+        String apiUrl = endpoint + "?url=" + url;;
+        requestSpec.uri(apiUrl);
 
-            String encodeUrl = URLEncoder.encode(url, StandardCharsets.UTF_8);
-            System.out.println("encodeUrl : " + encodeUrl);
-            System.out.println("fullUrl : " + endpoint + encodeUrl);
-//            String response = restTemplate.getForObject(endpoint + URLEncoder.encode(url, StandardCharsets.UTF_8), String.class);
-            String response = restTemplate.getForObject(endpoint + encodeUrl, String.class);
-            System.out.println("response : " + response);
-            // JSON 응답을 Map으로 반환
-            Map<String, Object> oembedData = new ObjectMapper().readValue(response, Map.class);
-            return ResponseEntity.ok(oembedData);
-        } catch (Exception e) {
-            e.printStackTrace();
-            return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(Map.of("error", "oEmbed 요청 실패", "message", e.getMessage()));
-        }
+        return requestSpec
+                .headers(headers -> {
+                    if (url.contains("youtube.com") || url.contains("youtu.be")) {
+                        headers.set(HttpHeaders.REFERER, "https://www.youtube.com/");
+                    } else if (url.contains("vimeo.com")) {
+                        headers.set(HttpHeaders.REFERER, "https://vimeo.com/");
+                    } else if (url.contains("twitter.com")) {
+                        headers.set(HttpHeaders.REFERER, "https://twitter.com/");
+                    } else if (url.contains("instagram.com")) {
+                        headers.set(HttpHeaders.REFERER, "https://www.instagram.com/");
+                    }
+                })
+                .retrieve()
+                .toEntity(String.class)
+                .flatMap(responseEntity -> {
+                    if (!responseEntity.getStatusCode().is2xxSuccessful()) {
+                        return Mono.just(ResponseEntity.status(responseEntity.getStatusCode())
+                                .body(Map.of("error", "외부 API 호출 실패", "code", responseEntity.getStatusCode().toString())));
+                    }
+                    try {
+                        String body = responseEntity.getBody();
+                        ObjectMapper mapper = new ObjectMapper();
+                        Map<String, Object> fullMap = mapper.readValue(body, Map.class);
+
+                        // 트위터의 경우 "html" 필드만 반환
+                        if (url.contains("twitter.com")) {
+                            String html = (String) fullMap.get("html");
+                            return Mono.just(ResponseEntity.ok(Map.of("html", html)));
+                        }
+
+                        // 그 외 서비스는 전체 응답 JSON 반환
+                        return Mono.just(ResponseEntity.ok(fullMap));
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                        return Mono.just(ResponseEntity.status(500).body(Map.of("error", "응답 파싱 실패", "message", e.getMessage())));
+                    }
+                })
+                .onErrorResume(e -> Mono.just(ResponseEntity.status(502).body(Map.of("error", "API 호출 중 예외 발생", "message", e.getMessage()))));
     }
 
-    private boolean isInstagram(String url) {
-        return url.contains("instagram.com");
-    }
-
-    // Instagram 별도 처리: 액세스 토큰 필수, 썸네일 필드 지원 중단
-    private ResponseEntity<Map<String, Object>> handleInstagramOembed(String url) {
-        String accessToken = System.getenv("IG_OEMBED_TOKEN");
-        if (accessToken == null) {
-            return ResponseEntity.badRequest().body(Map.of("error", "Instagram oEmbed를 사용하려면 액세스 토큰이 필요합니다."));
-        }
-        String endpoint = ENDPOINTS.get("instagram.com") + URLEncoder.encode(url, StandardCharsets.UTF_8)
-                + "&access_token=" + accessToken;
-        try {
-            String response = restTemplate.getForObject(endpoint, String.class);
-            Map<String, Object> oembedData = new ObjectMapper().readValue(response, Map.class);
-            if (!oembedData.containsKey("thumbnail_url")) {
-                oembedData.put("thumbnail_url", "썸네일 필드 제공 불가(API 정책 변경)");
-            }
-            return ResponseEntity.ok(oembedData);
-        } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
-                    .body(Map.of("error", "Instagram oEmbed 요청 실패", "message", e.getMessage()));
-        }
-    }
-
-    private String getOEmbedEndpoint(String url) {
+    private String getEndpoint(String url) {
         for (String key : ENDPOINTS.keySet()) {
             if (url.contains(key)) return ENDPOINTS.get(key);
         }
         return null;
     }
 }
-
